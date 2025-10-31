@@ -1,10 +1,10 @@
 package request
 
 import (
-	"bufio"
 	"errors"
 	"io"
 	"strings"
+	"unicode"
 )
 
 type Request struct {
@@ -18,35 +18,39 @@ type RequestLine struct {
 }
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	bufReader := bufio.NewReader(reader)
-	reqLineStr, err := bufReader.ReadString('\n')
+	request, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
 
-	parts := strings.Fields(reqLineStr)
-	if len(parts) < 3 {
-		return nil, errors.New("error parsing req")
+	parts, err := parseRequestLine(request)
+	if err != nil {
+		return nil, err
 	}
 
 	method := parts[0]
-	reqTarget := parts[1]
-	httpVer := parts[2]
+	requestTarget := parts[1]
+	httpVersion := parts[2]
 
-	if httpVer != "HTTP/1.1" {
-		return nil, errors.New("reqlineStr error")
+	for _, char := range method {
+		if !unicode.IsUpper(char) || !unicode.IsLetter(char) {
+			return nil, errors.New("invalid method")
+		}
 	}
 
-	version := strings.TrimPrefix(httpVer, "HTTP/")
+	if httpVersion != "HTTP/1.1" {
+		return nil, errors.New("invalid HTTP version")
+	}
+
+	version := strings.TrimPrefix(httpVersion, "HTTP/")
 
 	return &Request{
 		RequestLine: RequestLine{
 			HttpVersion:   version,
-			RequestTarget: reqTarget,
-			Method:        strings.ToUpper(method),
+			RequestTarget: requestTarget,
+			Method:        method,
 		},
 	}, nil
-
 }
 
 func parseRequestLine(request []byte) ([]string, error) {
