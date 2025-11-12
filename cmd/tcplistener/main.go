@@ -2,51 +2,11 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/jamesfulreader/httpfromtcp/internal/request"
 )
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	ch := make(chan string)
-
-	go func() {
-		defer close(ch)
-		defer f.Close()
-
-		buf := make([]byte, 8)
-		currentLine := ""
-
-		for {
-			n, err := f.Read(buf)
-			if n > 0 {
-				seg := string(buf[:n])
-				parts := strings.Split(seg, "\n")
-
-				for i := 0; i < len(parts)-1; i++ {
-					line := currentLine + parts[i]
-					ch <- line
-					currentLine = ""
-				}
-
-				currentLine += parts[len(parts)-1]
-			}
-
-			if err != nil {
-				if err == io.EOF {
-					if len(currentLine) > 0 {
-						ch <- currentLine
-					}
-					return
-				}
-				log.Fatal(err)
-			}
-		}
-	}()
-
-	return ch
-}
 
 func main() {
 
@@ -61,17 +21,14 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		fmt.Println("tcp connection on PORT 42069 accepted")
-
 		go func(c net.Conn) {
-			lines := getLinesChannel(c)
-			for line := range lines {
-				fmt.Println(line)
+			req, err := request.RequestFromReader(c)
+			if err != nil {
+				log.Fatal(err)
 			}
+
+			fmt.Printf("Request line:\n- Method: %s\n- Target: %s\n- Version: %s\n", req.RequestLine.Method, req.RequestLine.RequestTarget, req.RequestLine.HttpVersion)
 			c.Close()
 		}(conn)
-		fmt.Println("tcp connection closed")
 	}
-
 }
