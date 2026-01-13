@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -69,34 +70,67 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	return request, nil
 }
 
-func parseRequestLine(request []byte) ([]string, int) {
-	s := string(request)
+// parseRequestBlock looks for the end of headers ("\r\n\r\n") and
+// returns the request-line parts and the total bytes that should be
+// consumed (headers + body if Content-Length present). If more data
+// is needed it returns bytesConsumed==0.
+func parseRequestBlock(data []byte) ([]string, int, error) {
+	s := string(data)
 
-	indexRN := strings.Index(s, "\r\n")
-
-	if !strings.Contains(s, "\r\n") {
-		return nil, 0
-	} else {
-		bytesConsumed := indexRN + len("\r\n")
-		requestLine := strings.Split(s, "\r\n")
-		parts := strings.Split(requestLine[0], " ")
-
-		if len(parts) != 3 {
-			return nil, 0
-		}
-		return parts, bytesConsumed
+	headersEnd := strings.Index(s, "\r\n\r\n")
+	if headersEnd == -1 {
+		return nil, 0, nil // need more data
 	}
+
+	// headers block includes the trailing CRLFCRLF
+	headersBlock := s[:headersEnd+4]
+	lines := strings.Split(headersBlock, "\r\n")
+	if len(lines) == 0 {
+		return nil, 0, errors.New("empty request")
+	}
+
+	parts := strings.Split(lines[0], " ")
+	if len(parts) != 3 {
+		return nil, 0, errors.New("invalid request line format")
+	}
+
+	// look for Content-Length header (case-insensitive)
+	contentLength := 0
+	for _, hdr := range lines[1:] {
+		if hdr == "" {
+			continue
+		}
+		colonIdx := strings.Index(hdr, ":")
+		if colonIdx == -1 {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(hdr[:colonIdx]))
+		val := strings.TrimSpace(hdr[colonIdx+1:])
+		if name == "content-length" {
+			n, err := strconv.Atoi(val)
+			if err != nil {
+				return nil, 0, fmt.Errorf("invalid content-length: %v", err)
+			}
+			contentLength = n
+		}
+	}
+
+	totalNeeded := headersEnd + 4 + contentLength
+	if len(data) < totalNeeded {
+		return nil, 0, nil // need more data
+	}
+
+	return parts, totalNeeded, nil
 }
 
 func (r *Request) parse(data []byte) (int, error) {
 	if r.state == stateInitialized {
-		parts, bytesConsumed := parseRequestLine(data)
+		parts, bytesConsumed, err := parseRequestBlock(data)
+		if err != nil {
+			return 0, err
+		}
 		if bytesConsumed == 0 {
 			return 0, nil // more data needed but not an error
-		}
-
-		if len(parts) != 3 {
-			return bytesConsumed, errors.New("invalid request line format")
 		}
 
 		method := parts[0]
