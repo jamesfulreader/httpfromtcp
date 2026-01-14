@@ -1,10 +1,11 @@
 package main
 
 import (
-	"io"
+	"fmt"
 	"log"
 	"net"
-	"os"
+
+	"github.com/jamesfulreader/httpfromtcp/internal/request"
 )
 
 func main() {
@@ -21,10 +22,19 @@ func main() {
 		}
 		go func(c net.Conn) {
 			defer c.Close()
-			_, err := io.Copy(os.Stdout, c)
+			// _, err := io.Copy(os.Stdout, c)
+			// if err != nil {
+			// 	log.Printf("error copying connection to stdout: %v", err)
+			// }
+			req, err := request.RequestFromReader(c)
 			if err != nil {
-				log.Printf("error copying connection to stdout: %v", err)
+				log.Printf("error parsing request: %v", err)
 			}
+			fmt.Printf(
+				"Request line:\n- Method: %s\n- Target: %s\n- Version: %s\n",
+				req.RequestLine.Method,
+				req.RequestLine.RequestTarget,
+				req.RequestLine.HttpVersion)
 		}(conn)
 	}
 }
